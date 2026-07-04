@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ApexProp Terminal</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">AP</span><div><b>ApexProp</b><small>Founder Terminal</small></div></div>
+      <div class="status"><span id="providerDot"></span><span id="providerText">Connecting...</span></div>
+      <h3>Watchlist</h3>
+      <div id="watchlist" class="watchlist"></div>
+      <div class="ruleCard"><b>Prop Rules</b><p>Max Daily Loss: <span>$1,000</span></p><p>Max Drawdown: <span>8%</span></p><p>Target: <span>10%</span></p></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><h1 id="symbolTitle">BINANCE:BTCUSDT</h1><p>Real-time 1-minute candles • risk dashboard • challenge metrics</p></div>
+        <div class="actions"><button id="demoTrade">Simulate Trade</button><button id="resetBtn">Reset</button></div>
+      </header>
+
+      <section class="metrics">
+        <div><small>Equity</small><b id="equity">$100,000.00</b></div>
+        <div><small>Balance</small><b id="balance">$100,000.00</b></div>
+        <div><small>Floating P/L</small><b id="floating">$0.00</b></div>
+        <div><small>Daily Loss Used</small><b id="lossUsed">0.0%</b></div>
+      </section>
+
+      <section class="chartPanel">
+        <div class="chartHeader"><b>Live Candlestick Chart</b><span id="lastPrice">—</span></div>
+        <div id="chart"></div>
+      </section>
+
+      <section class="bottomGrid">
+        <div class="panel"><h3>Challenge Status</h3><div class="progress"><span id="targetBar"></span></div><p id="challengeText">Target progress: 0%</p></div>
+        <div class="panel"><h3>Positions</h3><table><thead><tr><th>Symbol</th><th>Side</th><th>Size</th><th>P/L</th></tr></thead><tbody id="positions"><tr><td colspan="4">No open positions</td></tr></tbody></table></div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
