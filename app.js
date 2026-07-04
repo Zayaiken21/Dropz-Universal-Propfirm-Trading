@@ -1,95 +1,15 @@
-const $ = (id) => document.getElementById(id);
-let currentSymbol = 'BINANCE:BTCUSDT';
-let balance = 100000;
-let floating = 0;
-let positions = [];
+const $ = (q)=>document.querySelector(q); const $$=(q)=>document.querySelectorAll(q);
+function navActive(){const p=location.pathname; $$('.nav a').forEach(a=>a.classList.toggle('active', a.getAttribute('href')===p || (p==='/'&&a.getAttribute('href')==='/')))}
+function menu(){const b=$('#menuBtn'), s=$('.sidebar'); if(b&&s){b.onclick=()=>s.classList.toggle('open'); document.addEventListener('click',e=>{if(innerWidth<900&&!s.contains(e.target)&&e.target!==b)s.classList.remove('open')})}}
+function money(n){return '$'+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+function initBase(){navActive();menu(); const y=$('#year'); if(y)y.textContent=new Date().getFullYear()}
+function initTerminal(){ if(!$('#chart')) return; let symbol='BTCUSDT', equity=100000,balance=100000,floating=0,last=0,series,chart,ws;
+ chart=LightweightCharts.createChart($('#chart'),{layout:{background:{color:'#071019'},textColor:'#cfe0ef'},grid:{vertLines:{color:'rgba(255,255,255,.05)'},horzLines:{color:'rgba(255,255,255,.05)'}},rightPriceScale:{borderColor:'rgba(255,255,255,.12)'},timeScale:{borderColor:'rgba(255,255,255,.12)',timeVisible:true,secondsVisible:false},crosshair:{mode:1}});
+ series=chart.addCandlestickSeries({upColor:'#26d07c',downColor:'#ff5571',borderUpColor:'#26d07c',borderDownColor:'#ff5571',wickUpColor:'#26d07c',wickDownColor:'#ff5571'});
+ new ResizeObserver(()=>chart.applyOptions({width:$('#chart').clientWidth,height:$('#chart').clientHeight})).observe($('#chart'));
+ function connect(){ if(ws) ws.close(); const proto=location.protocol==='https:'?'wss':'ws'; ws=new WebSocket(`${proto}://${location.host}/ws/market`); ws.onopen=()=>{ws.send(JSON.stringify({symbol})); $('#conn').textContent='Live feed connected'}; ws.onmessage=(ev)=>{const m=JSON.parse(ev.data); if(m.type==='history'){series.setData(m.candles); chart.timeScale().fitContent()} if(m.type==='candle'){series.update(m.candle); last=m.price; $('#livePrice').textContent=money(last); $('#spread').textContent=(Math.random()*1.8+.2).toFixed(1)+' pts'; floating+=(Math.random()-.5)*18; equity=balance+floating; $('#equity').textContent=money(equity); $('#floating').textContent=money(floating); $('#loss').textContent=Math.max(0,((100000-equity)/1000)*100).toFixed(1)+'%'; $('#targetBar').style.width=Math.min(100,Math.max(0,((equity-100000)/10000)*100))+'%'; }}; ws.onclose=()=>{$('#conn').textContent='Reconnecting...'; setTimeout(connect,1200)}} connect();
+ $$('.sym').forEach(b=>b.onclick=()=>{symbol=b.dataset.symbol; $$('.sym').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $('#symbolTitle').textContent=symbol; connect()});
+ $('#tradeBtn')?.addEventListener('click',()=>{const row=document.createElement('tr'); const side=Math.random()>.5?'BUY':'SELL'; row.innerHTML=`<td>${new Date().toLocaleTimeString()}</td><td>${symbol}</td><td class="${side==='BUY'?'green':'red'}">${side}</td><td>${money(last||0)}</td><td>Open</td>`; $('#positionsBody').prepend(row)});
+ $('#resetBtn')?.addEventListener('click',()=>{equity=balance=100000;floating=0;$('#positionsBody').innerHTML='';$('#equity').textContent=money(equity);$('#floating').textContent=money(0);$('#loss').textContent='0.0%';$('#targetBar').style.width='0%'})}
 
-const chart = LightweightCharts.createChart($('chart'), {
-  layout: { background: { color: '#0e1626' }, textColor: '#cfe3ff' },
-  grid: { vertLines: { color: '#18263d' }, horzLines: { color: '#18263d' } },
-  rightPriceScale: { borderColor: '#263852' },
-  timeScale: { borderColor: '#263852', timeVisible: true, secondsVisible: false },
-  crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
-});
-const candleSeries = chart.addCandlestickSeries({
-  upColor: '#22c55e', downColor: '#ef4444', borderUpColor: '#22c55e', borderDownColor: '#ef4444', wickUpColor: '#22c55e', wickDownColor: '#ef4444'
-});
-
-async function loadSymbols() {
-  const res = await fetch('/api/symbols');
-  const data = await res.json();
-  $('providerText').textContent = data.provider === 'finnhub' ? 'Live Finnhub feed' : 'Simulation mode — add API key';
-  $('providerDot').style.background = data.provider === 'finnhub' ? '#22c55e' : '#facc15';
-  $('watchlist').innerHTML = data.symbols.map(s => `<div class="watchItem ${s===currentSymbol?'active':''}" data-symbol="${s}"><b>${s}</b><span>1m</span></div>`).join('');
-  document.querySelectorAll('.watchItem').forEach(el => el.onclick = () => switchSymbol(el.dataset.symbol));
-}
-
-async function loadHistory(symbol) {
-  const res = await fetch(`/api/history?symbol=${encodeURIComponent(symbol)}`);
-  const data = await res.json();
-  candleSeries.setData(data.candles);
-  chart.timeScale().fitContent();
-  const last = data.candles[data.candles.length - 1];
-  updatePrice(last.close);
-}
-
-function connectStream() {
-  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${protocol}://${location.host}/stream`);
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'subscribe', symbol: currentSymbol }));
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === 'candle' && msg.symbol === currentSymbol) {
-      candleSeries.update(msg.candle);
-      updatePrice(msg.candle.close);
-      markToMarket(msg.candle.close);
-    }
-  };
-  ws.onclose = () => setTimeout(connectStream, 2000);
-  window.activeWS = ws;
-}
-
-function switchSymbol(symbol) {
-  currentSymbol = symbol;
-  $('symbolTitle').textContent = symbol;
-  document.querySelectorAll('.watchItem').forEach(el => el.classList.toggle('active', el.dataset.symbol === symbol));
-  if (window.activeWS?.readyState === WebSocket.OPEN) window.activeWS.send(JSON.stringify({ type: 'subscribe', symbol }));
-  loadHistory(symbol);
-}
-
-function updatePrice(price) {
-  $('lastPrice').textContent = Number(price).toLocaleString(undefined, { maximumFractionDigits: price < 10 ? 5 : 2 });
-}
-
-function markToMarket(price) {
-  floating = positions.reduce((sum, p) => sum + (p.side === 'BUY' ? price - p.entry : p.entry - price) * p.size, 0);
-  const equity = balance + floating;
-  $('floating').textContent = money(floating);
-  $('floating').className = floating >= 0 ? 'green' : 'red';
-  $('equity').textContent = money(equity);
-  const lossUsed = Math.max(0, -floating / 1000 * 100);
-  $('lossUsed').textContent = `${lossUsed.toFixed(1)}%`;
-  const targetProgress = Math.min(100, Math.max(0, (equity - 100000) / 10000 * 100));
-  $('targetBar').style.width = `${targetProgress}%`;
-  $('challengeText').textContent = `Target progress: ${targetProgress.toFixed(1)}%`;
-  renderPositions();
-}
-
-function renderPositions() {
-  if (!positions.length) { $('positions').innerHTML = '<tr><td colspan="4">No open positions</td></tr>'; return; }
-  $('positions').innerHTML = positions.map(p => `<tr><td>${p.symbol}</td><td>${p.side}</td><td>${p.size}</td><td class="${floating >= 0 ? 'green':'red'}">${money(floating)}</td></tr>`).join('');
-}
-function money(n){return n.toLocaleString(undefined,{style:'currency',currency:'USD'});} 
-
-$('demoTrade').onclick = () => {
-  const shown = $('lastPrice').textContent.replace(/,/g,'');
-  const entry = Number(shown) || 100;
-  positions = [{ symbol: currentSymbol, side: Math.random() > .5 ? 'BUY' : 'SELL', size: currentSymbol.includes('BTC') ? .25 : 10, entry }];
-  renderPositions();
-};
-$('resetBtn').onclick = () => { balance = 100000; floating = 0; positions = []; $('balance').textContent = money(balance); markToMarket(Number($('lastPrice').textContent.replace(/,/g,'')) || 0); };
-
-loadSymbols();
-loadHistory(currentSymbol);
-connectStream();
-addEventListener('resize', () => chart.applyOptions({ width: $('chart').clientWidth }));
+document.addEventListener('DOMContentLoaded',()=>{initBase();initTerminal()});

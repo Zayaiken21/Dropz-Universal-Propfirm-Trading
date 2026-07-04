@@ -1,13 +1,10 @@
 services:
   - type: web
-    name: propfirm-trading-platform
+    name: dropz-universal-propfirm-trading
     env: node
     plan: free
     buildCommand: npm install
     startCommand: npm start
-    healthCheckPath: /health
     envVars:
       - key: DATA_PROVIDER
-        value: simulation
-      - key: FINNHUB_API_KEY
-        sync: false
+        value: binance
