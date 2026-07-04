@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: propfirm-trading-platform
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_PROVIDER
+        value: finnhub
+      - key: FINNHUB_API_KEY
+        sync: false
