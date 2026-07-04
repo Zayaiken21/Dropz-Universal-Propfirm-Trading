@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -10,25 +11,23 @@ const wss = new WebSocket.Server({ server, path: '/stream' });
 
 const PORT = process.env.PORT || 3000;
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || '';
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(PUBLIC_DIR));
 
 const SYMBOLS = ['BINANCE:BTCUSDT', 'BINANCE:ETHUSDT', 'OANDA:XAU_USD', 'OANDA:EUR_USD', 'AAPL', 'TSLA', 'NVDA'];
 const clients = new Map();
 const candles = new Map();
 let upstream = null;
-let simulationTimer = null;
 
 function normalizeSymbol(symbol) {
   return SYMBOLS.includes(symbol) ? symbol : 'BINANCE:BTCUSDT';
 }
-
 function bucketTime(unixMs, intervalSec = 60) {
   return Math.floor(unixMs / 1000 / intervalSec) * intervalSec;
 }
-
 function updateCandle(symbol, price, volume = 1, unixMs = Date.now()) {
   const time = bucketTime(unixMs);
   const key = `${symbol}:${time}`;
@@ -44,15 +43,11 @@ function updateCandle(symbol, price, volume = 1, unixMs = Date.now()) {
   }
   broadcast(symbol, { type: 'candle', symbol, candle: c });
 }
-
 function broadcast(symbol, payload) {
   for (const [ws, state] of clients.entries()) {
-    if (ws.readyState === WebSocket.OPEN && state.symbol === symbol) {
-      ws.send(JSON.stringify(payload));
-    }
+    if (ws.readyState === WebSocket.OPEN && state.symbol === symbol) ws.send(JSON.stringify(payload));
   }
 }
-
 function generateHistory(symbol, count = 180) {
   const baseMap = {
     'BINANCE:BTCUSDT': 62000,
@@ -79,13 +74,19 @@ function generateHistory(symbol, count = 180) {
   return out;
 }
 
+app.get('/health', (_req, res) => res.status(200).send('ok'));
 app.get('/api/symbols', (_req, res) => {
   res.json({ symbols: SYMBOLS, provider: FINNHUB_API_KEY ? 'finnhub' : 'simulation' });
 });
-
 app.get('/api/history', (req, res) => {
   const symbol = normalizeSymbol(req.query.symbol || 'BINANCE:BTCUSDT');
   res.json({ symbol, interval: '1m', candles: generateHistory(symbol) });
+});
+
+// Critical Render fix: always return the HTML app for / and browser refreshes.
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/stream')) return res.status(404).json({ error: 'Not found' });
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 function startFinnhub() {
@@ -109,10 +110,9 @@ function startFinnhub() {
   upstream.on('error', (err) => console.error('Finnhub error:', err.message));
   return true;
 }
-
 function startSimulation() {
   const prices = Object.fromEntries(SYMBOLS.map(s => [s, generateHistory(s, 1)[0].close]));
-  simulationTimer = setInterval(() => {
+  setInterval(() => {
     for (const symbol of SYMBOLS) {
       const p = prices[symbol];
       const next = Math.max(0.0001, p + (Math.random() - 0.5) * p * 0.0018);
