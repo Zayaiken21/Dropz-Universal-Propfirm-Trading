@@ -1,1 +1,1 @@
-{"name":"dropz-universal-propfirm-trading-iphone-safe","version":"3.0.0","description":"iPhone-safe Render deploy for Dropz Universal Propfirm Trading","main":"server.js","scripts":{"start":"node server.js","build":"echo no-build-needed"},"dependencies":{"express":"^4.18.3","ws":"^8.16.0"},"engines":{"node":">=18"}}
+{"scripts":{"start":"node server.js"},"dependencies":{"express":"^4.18.3"},"engines":{"node":">=18"}}

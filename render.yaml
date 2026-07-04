@@ -2,6 +2,5 @@ services:
   - type: web
     name: dropz-universal-propfirm-trading
     env: node
-    plan: free
     buildCommand: npm install
     startCommand: npm start
