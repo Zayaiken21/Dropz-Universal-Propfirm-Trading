@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -12,21 +13,22 @@ const wss = new WebSocket.Server({ server, path: '/stream' });
 const PORT = process.env.PORT || 3000;
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(PUBLIC_DIR));
 
 const SYMBOLS = ['BINANCE:BTCUSDT', 'BINANCE:ETHUSDT', 'OANDA:XAU_USD', 'OANDA:EUR_USD', 'AAPL', 'TSLA', 'NVDA'];
 const clients = new Map();
 const candles = new Map();
 let upstream = null;
 
-function normalizeSymbol(symbol) {
-  return SYMBOLS.includes(symbol) ? symbol : 'BINANCE:BTCUSDT';
-}
-function bucketTime(unixMs, intervalSec = 60) {
-  return Math.floor(unixMs / 1000 / intervalSec) * intervalSec;
+function normalizeSymbol(symbol) { return SYMBOLS.includes(symbol) ? symbol : 'BINANCE:BTCUSDT'; }
+function bucketTime(unixMs, intervalSec = 60) { return Math.floor(unixMs / 1000 / intervalSec) * intervalSec; }
+function broadcast(symbol, payload) {
+  for (const [ws, state] of clients.entries()) {
+    if (ws.readyState === WebSocket.OPEN && state.symbol === symbol) ws.send(JSON.stringify(payload));
+  }
 }
 function updateCandle(symbol, price, volume = 1, unixMs = Date.now()) {
   const time = bucketTime(unixMs);
@@ -43,21 +45,8 @@ function updateCandle(symbol, price, volume = 1, unixMs = Date.now()) {
   }
   broadcast(symbol, { type: 'candle', symbol, candle: c });
 }
-function broadcast(symbol, payload) {
-  for (const [ws, state] of clients.entries()) {
-    if (ws.readyState === WebSocket.OPEN && state.symbol === symbol) ws.send(JSON.stringify(payload));
-  }
-}
 function generateHistory(symbol, count = 180) {
-  const baseMap = {
-    'BINANCE:BTCUSDT': 62000,
-    'BINANCE:ETHUSDT': 3300,
-    'OANDA:XAU_USD': 2350,
-    'OANDA:EUR_USD': 1.08,
-    AAPL: 210,
-    TSLA: 260,
-    NVDA: 125
-  };
+  const baseMap = { 'BINANCE:BTCUSDT': 62000, 'BINANCE:ETHUSDT': 3300, 'OANDA:XAU_USD': 2350, 'OANDA:EUR_USD': 1.08, AAPL: 210, TSLA: 260, NVDA: 125 };
   let price = baseMap[symbol] || 100;
   const now = bucketTime(Date.now());
   const out = [];
@@ -74,19 +63,20 @@ function generateHistory(symbol, count = 180) {
   return out;
 }
 
-app.get('/health', (_req, res) => res.status(200).send('ok'));
-app.get('/api/symbols', (_req, res) => {
-  res.json({ symbols: SYMBOLS, provider: FINNHUB_API_KEY ? 'finnhub' : 'simulation' });
-});
+app.get('/health', (_req, res) => res.type('text').send('ok'));
+app.get('/api/symbols', (_req, res) => res.json({ symbols: SYMBOLS, provider: FINNHUB_API_KEY ? 'finnhub' : 'simulation' }));
 app.get('/api/history', (req, res) => {
   const symbol = normalizeSymbol(req.query.symbol || 'BINANCE:BTCUSDT');
   res.json({ symbol, interval: '1m', candles: generateHistory(symbol) });
 });
 
-// Critical Render fix: always return the HTML app for / and browser refreshes.
-app.get('*', (req, res) => {
+app.use(express.static(PUBLIC_DIR, { index: false, extensions: ['html'] }));
+
+// Render/browser fallback: every non-API GET returns the app shell.
+app.get(/.*/, (req, res) => {
   if (req.path.startsWith('/api/') || req.path.startsWith('/stream')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  if (!fs.existsSync(INDEX_FILE)) return res.status(500).send(`index.html missing at ${INDEX_FILE}`);
+  res.sendFile(INDEX_FILE);
 });
 
 function startFinnhub() {
@@ -103,10 +93,7 @@ function startFinnhub() {
       for (const t of msg.data) updateCandle(t.s, Number(t.p), Number(t.v || 1), Number(t.t || Date.now()));
     } catch (e) { console.error('stream parse error', e.message); }
   });
-  upstream.on('close', () => {
-    console.log('Finnhub stream closed; retrying in 5s');
-    setTimeout(startFinnhub, 5000);
-  });
+  upstream.on('close', () => { console.log('Finnhub stream closed; retrying in 5s'); setTimeout(startFinnhub, 5000); });
   upstream.on('error', (err) => console.error('Finnhub error:', err.message));
   return true;
 }
@@ -121,18 +108,14 @@ function startSimulation() {
     }
   }, 1000);
 }
-
 wss.on('connection', (ws) => {
   clients.set(ws, { symbol: 'BINANCE:BTCUSDT' });
   ws.send(JSON.stringify({ type: 'status', provider: FINNHUB_API_KEY ? 'finnhub' : 'simulation' }));
   ws.on('message', (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'subscribe') clients.set(ws, { symbol: normalizeSymbol(msg.symbol) });
-    } catch (_) {}
+    try { const msg = JSON.parse(raw.toString()); if (msg.type === 'subscribe') clients.set(ws, { symbol: normalizeSymbol(msg.symbol) }); } catch (_) {}
   });
   ws.on('close', () => clients.delete(ws));
 });
 
 if (!startFinnhub()) startSimulation();
-server.listen(PORT, () => console.log(`Trading platform running on :${PORT}`));
+server.listen(PORT, () => console.log(`Trading platform running on :${PORT}; public=${PUBLIC_DIR}`));
