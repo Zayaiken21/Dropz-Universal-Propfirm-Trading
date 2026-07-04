@@ -1,58 +1,41 @@
 const express = require('express');
-const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
-
+const path = require('path');
+const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+const ROOT = __dirname;
 const PUBLIC = path.join(__dirname, 'public');
 
+// Serve BOTH layouts so it works on Render, GitHub uploads, iPhone ZIP uploads, and static hosting.
+app.use('/assets', express.static(path.join(ROOT, 'assets')));
+app.use('/public', express.static(PUBLIC));
+app.use(express.static(ROOT, { extensions: ['html'] }));
 app.use(express.static(PUBLIC, { extensions: ['html'] }));
 
-const routes = {
-  '/': 'index.html',
-  '/terminal': 'pages/terminal.html',
-  '/dashboard': 'pages/dashboard.html',
-  '/challenge': 'pages/challenge.html',
-  '/rules': 'pages/rules.html',
-  '/positions': 'pages/positions.html',
-  '/settings': 'pages/settings.html'
-};
-Object.entries(routes).forEach(([url, file]) => {
-  app.get(url, (_, res) => res.sendFile(path.join(PUBLIC, file)));
-});
-app.get('*', (_, res) => res.sendFile(path.join(PUBLIC, 'index.html')));
-
-// Local simulated market WebSocket. Replace later with broker/feed bridge.
-const wss = new WebSocket.Server({ server, path: '/ws/market' });
-const symbols = { 'BTCUSDT': 67500, 'ETHUSDT': 3500, 'XAUUSD': 2350, 'EURUSD': 1.085, 'NAS100': 19800 };
-const candles = {};
-function nextCandle(symbol) {
-  const now = Math.floor(Date.now() / 1000);
-  const bucket = now - (now % 60);
-  let price = symbols[symbol] || 100;
-  const vol = symbol.includes('USD') && symbol !== 'EURUSD' ? price * 0.0008 : 0.0004;
-  const change = (Math.random() - 0.48) * vol;
-  const next = Math.max(0.0001, price + change);
-  symbols[symbol] = next;
-  if (!candles[symbol] || candles[symbol].time !== bucket) {
-    candles[symbol] = { time: bucket, open: price, high: Math.max(price, next), low: Math.min(price, next), close: next };
-  } else {
-    const c = candles[symbol]; c.high = Math.max(c.high, next); c.low = Math.min(c.low, next); c.close = next;
-  }
-  return { symbol, candle: candles[symbol], price: next };
+const pages = ['index','terminal','dashboard','challenge','rules','positions','settings'];
+function sendPage(res, name){
+  const candidates = [path.join(ROOT, `${name}.html`), path.join(PUBLIC, `${name}.html`)];
+  const found = candidates.find(fs.existsSync);
+  if(found) return res.sendFile(found);
+  return res.status(500).send('Dropz page missing: '+name+'.html');
 }
-wss.on('connection', (socket) => {
-  let symbol = 'BTCUSDT';
-  socket.on('message', (msg) => { try { const data = JSON.parse(msg); if (data.symbol) symbol = data.symbol; } catch {} });
-  const seed = [];
-  let base = symbols[symbol];
-  const t = Math.floor(Date.now()/1000) - 120*60;
-  for (let i=0;i<120;i++) { const open = base; const close = Math.max(0.0001, open + (Math.random()-.49)*(open*.001)); const high=Math.max(open,close)*(1+Math.random()*.0009); const low=Math.min(open,close)*(1-Math.random()*.0009); base=close; seed.push({time:t+i*60,open,high,low,close}); }
-  socket.send(JSON.stringify({ type:'history', symbol, candles: seed }));
-  const timer = setInterval(() => socket.readyState === 1 && socket.send(JSON.stringify({ type:'candle', ...nextCandle(symbol) })), 1000);
-  socket.on('close', () => clearInterval(timer));
-});
+app.get('/', (_,res)=>sendPage(res,'index'));
+pages.forEach(p=>{ app.get('/'+p, (_,res)=>sendPage(res,p)); app.get('/'+p+'.html', (_,res)=>sendPage(res,p)); });
+app.get('*', (_,res)=>sendPage(res,'index'));
 
-server.listen(PORT, () => console.log(`Dropz Universal Propfirm Trading running on ${PORT}`));
+const symbols = { BTCUSDT:67500, ETHUSDT:3500, XAUUSD:2350, EURUSD:1.085, NAS100:19800 };
+const live = {};
+function candle(symbol){
+  const now = Math.floor(Date.now()/1000); const time = now - now%60;
+  const base = symbols[symbol] || 100; const move = (Math.random()-.48)*(base*.0011); const price = Math.max(.0001,base+move); symbols[symbol]=price;
+  if(!live[symbol] || live[symbol].time!==time) live[symbol]={time,open:base,high:Math.max(base,price),low:Math.min(base,price),close:price};
+  else { const c=live[symbol]; c.high=Math.max(c.high,price); c.low=Math.min(c.low,price); c.close=price; }
+  return {symbol, price, candle:live[symbol]};
+}
+function history(symbol){ let base=symbols[symbol]||100, t=Math.floor(Date.now()/1000)-120*60, out=[]; for(let i=0;i<120;i++){const o=base,c=Math.max(.0001,o+(Math.random()-.49)*(o*.0016)),h=Math.max(o,c)*(1+Math.random()*.001),l=Math.min(o,c)*(1-Math.random()*.001);base=c;out.push({time:t+i*60,open:o,high:h,low:l,close:c});} return out; }
+const wss = new WebSocket.Server({server, path:'/ws/market'});
+wss.on('connection', ws=>{ let symbol='BTCUSDT'; ws.send(JSON.stringify({type:'history',symbol,candles:history(symbol)})); ws.on('message', raw=>{try{const m=JSON.parse(raw); if(m.symbol){symbol=m.symbol; ws.send(JSON.stringify({type:'history',symbol,candles:history(symbol)}));}}catch{}}); const timer=setInterval(()=>{if(ws.readyState===1) ws.send(JSON.stringify({type:'candle',...candle(symbol)}));},1000); ws.on('close',()=>clearInterval(timer)); });
+server.listen(PORT, ()=>console.log(`Dropz Universal Propfirm Trading running on port ${PORT}`));
